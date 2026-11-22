@@ -8,6 +8,7 @@ import * as sqs from "aws-cdk-lib/aws-sqs";
 import * as sns from "aws-cdk-lib/aws-sns";
 import * as subs from "aws-cdk-lib/aws-sns-subscriptions";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 
 import { Construct } from "constructs";
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
@@ -21,6 +22,14 @@ export class EDAAppStack extends cdk.Stack {
       autoDeleteObjects: true,
       publicReadAccess: false,
     });
+
+    const imagesTable = new dynamodb.Table(this, "ImagesTable", {
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      partitionKey: { name: "name", type: dynamodb.AttributeType.STRING },
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      tableName: "Images",
+    });
+
 
     // Output
     
@@ -40,16 +49,22 @@ export class EDAAppStack extends cdk.Stack {
 
     // Lambda functions
 
-    const processImageFn = new lambdanode.NodejsFunction(
+    const persistImageDataFn = new lambdanode.NodejsFunction(
       this,
-      "ProcessImage",
+      "PersistImageDataFn",
       {
         runtime: lambda.Runtime.NODEJS_22_X,
-        entry: `${__dirname}/../lambdas/processImage.ts`,
+        entry: `${__dirname}/../lambdas/persistImageData.ts`,
         timeout: cdk.Duration.seconds(15),
         memorySize: 128,
+        environment: {
+          TABLE_NAME: imagesTable.tableName,
+          BUCKET_NAME: imagesBucket.bucketName,
+          REGION: 'eu-west-1'
+        },
       }
     );
+
 
     // S3 --> SNS
     imagesBucket.addEventNotification(
@@ -99,11 +114,13 @@ export class EDAAppStack extends cdk.Stack {
       maxBatchingWindow: cdk.Duration.seconds(5),
     });
 
-    processImageFn.addEventSource(newImageEventSource);
+    persistImageDataFn.addEventSource(newImageEventSource); 
 
     // Permissions
 
-    imagesBucket.grantRead(processImageFn);
+    imagesBucket.grantRead(persistImageDataFn);
+
+    imagesTable.grantReadWriteData(persistImageDataFn);
 
   }
 }
